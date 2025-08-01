@@ -1,7 +1,6 @@
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageFilter
 import numpy as np
-import cv2
 import google.generativeai as genai
 import io
 import time
@@ -27,8 +26,18 @@ st.set_page_config(page_title="Symmetrich", layout="centered")
 # --- Gemini Setup ---
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    gemini_model = genai.GenerativeModel('gemini-2.0-flash')
-    vision_model = genai.GenerativeModel("gemini-2.0-flash")
+    
+    # --- FIX: Set temperature to 0 for consistent, deterministic results ---
+    generation_config = genai.types.GenerationConfig(temperature=0)
+    
+    gemini_model = genai.GenerativeModel(
+        'gemini-1.5-flash',
+        generation_config=generation_config
+    )
+    vision_model = genai.GenerativeModel(
+        "gemini-1.5-flash",
+        generation_config=generation_config
+    )
 except Exception as e:
     st.error(f"Configuration Error: Could not load Gemini API key. Details: {e}")
     st.stop()
@@ -44,16 +53,12 @@ if 'logged_in' not in st.session_state:
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
-
-        /* --- Global Styles --- */
         html, body, *, h1, h2, h3, h4, h5, h6, [class*="st-"] {
             font-family: 'Poppins', sans-serif !important;
         }
         .stApp {
             background: linear-gradient(to right, #16222A, #3A6073);
         }
-
-        /* --- Fun Title and Subtitle Styles --- */
         .title-container {
             display: flex;
             justify-content: center;
@@ -92,8 +97,6 @@ st.markdown("""
             50% { transform: translateY(-10px); }
             100% { transform: translateY(0px); }
         }
-        
-        /* --- Glassmorphism Containers --- */
         .symmetry-box, .history-entry {
             background-color: rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(12px);
@@ -196,16 +199,24 @@ def evaluate_symmetry_and_components(image_pil, uploaded_file_type):
     cropped_image_bytes, _ = get_image_bytes_and_mime(cropped_image_pil, uploaded_file_type)
     image_pil_resized = cropped_image_pil.resize((400, 400))
     image_gray = image_pil_resized.convert("L")
-    img_np = np.array(image_gray)
+    
+    image_blurred = image_gray.filter(ImageFilter.GaussianBlur(radius=2))
+    
+    img_np = np.array(image_blurred)
+    
     h, w = img_np.shape
     mid = w // 2
     left = img_np[:, :mid]
     right = img_np[:, mid:]
-    right_flipped = cv2.flip(right, 1)
+    
+    right_flipped = np.fliplr(right)
+    
     min_w = min(left.shape[1], right_flipped.shape[1])
     left = left[:, :min_w]
     right_flipped = right_flipped[:, :min_w]
-    diff = cv2.absdiff(left, right_flipped)
+
+    diff = np.abs(left.astype(np.int16) - right_flipped.astype(np.int16))
+    
     score = round(100 - (np.mean(diff) / 255 * 100), 2)
     ai_sandwich_analysis = "AI could not provide overall analysis."
     is_actually_sandwich = False
@@ -226,10 +237,9 @@ def evaluate_symmetry_and_components(image_pil, uploaded_file_type):
     if is_actually_sandwich:
         st.info("Analyzing filling symmetry with AI...")
         filling_analysis_description = analyze_filling_symmetry(cropped_image_bytes, mime_type)
-    return score, diff, None, None, ai_sandwich_analysis, is_actually_sandwich, filling_analysis_description
+    return score, None, None, None, ai_sandwich_analysis, is_actually_sandwich, filling_analysis_description
 
 def generate_comment(score, ai_sandwich_analysis, filling_analysis_description):
-    # --- RESTORED a more detailed prompt for better, more accurate critiques ---
     prompt = f"""
 You are a sarcastic and witty food critic who only reviews the symmetry of sandwiches.
 A sandwich just scored {score}/100 in a symmetry test.
