@@ -26,28 +26,20 @@ st.set_page_config(page_title="Symmetrich", layout="centered")
 # --- Gemini Setup ---
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    
-    # --- FIX: Set temperature to 0 for consistent, deterministic results ---
     generation_config = genai.types.GenerationConfig(temperature=0)
-    
-    gemini_model = genai.GenerativeModel(
-        'gemini-1.5-flash',
-        generation_config=generation_config
-    )
-    vision_model = genai.GenerativeModel(
-        "gemini-1.5-flash",
-        generation_config=generation_config
-    )
+    gemini_model = genai.GenerativeModel('gemini-2.0-flash', generation_config=generation_config)
+    vision_model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
 except Exception as e:
     st.error(f"Configuration Error: Could not load Gemini API key. Details: {e}")
     st.stop()
 
 # --- Session State Management ---
 if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
-    st.session_state['user_id'] = None
-    st.session_state['username'] = None
-    st.session_state['page'] = 'Login'
+    st.session_state.update({
+        'logged_in': False, 'user_id': None, 'username': None, 'page': 'Login'
+    })
+if 'glow_active' not in st.session_state:
+    st.session_state.glow_active = False
 
 # --- UI Styling ---
 st.markdown("""
@@ -70,7 +62,8 @@ st.markdown("""
         .logo-emoji {
             font-size: 4rem;
             animation: float 4s ease-in-out infinite;
-            text-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            transition: filter 0.5s ease-in-out;
+            filter: drop-shadow(0 5px 15px rgba(0,0,0,0.3));
         }
         .logo-emoji:last-child {
             animation-delay: -2s;
@@ -82,7 +75,7 @@ st.markdown("""
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            text-fill-color: transparent;
+            transition: all 0.5s ease;
         }
         .subtitle {
             text-align: center;
@@ -100,168 +93,92 @@ st.markdown("""
         .symmetry-box, .history-entry {
             background-color: rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 20px;
             padding: 25px;
         }
-        .symmetry-box {
-            text-align: center;
-            box-shadow: 0 0 30px rgba(0, 245, 212, 0.2);
-            margin-top: 20px;
+        .history-entry { margin-bottom: 15px; }
+        .glow-effect .main-title {
+            background: none;
+            -webkit-text-fill-color: white;
+            text-shadow: 0 0 8px #fff, 0 0 16px #fff, 0 0 24px #fff;
         }
-        .history-entry {
-            margin-bottom: 15px;
-        }
-        .high-score {
-            animation: glow 1.5s ease-in-out infinite alternate;
-        }
-        @keyframes glow {
-            from { box-shadow: 0 0 20px rgba(0, 245, 212, 0.3); }
-            to { box-shadow: 0 0 40px rgba(0, 245, 212, 0.7); }
-        }
-        .symmetry-box h3 span {
-            color: #00F5D4;
-            font-weight: 700 !important;
-            font-size: 1.5em;
-            text-shadow: 0 0 15px rgba(0, 245, 212, 0.7);
+        .glow-effect .logo-emoji {
+            filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.8));
         }
     </style>
 """, unsafe_allow_html=True)
 
 
-# --- Helper Functions ---
+# --- Helper and Core Logic Functions ---
 def get_image_bytes_and_mime(image_pil, uploaded_file_type):
     image_bytes_io = io.BytesIO()
-    image_pil.save(image_bytes_io, format=image_pil.format if image_pil.format else 'PNG')
+    image_pil.save(image_bytes_io, format=image_pil.format or 'PNG')
     return image_bytes_io.getvalue(), uploaded_file_type
 
 def get_sandwich_bounding_box(image_bytes, mime_type, img_width, img_height):
     try:
-        prompt = (
-            "Identify the main sandwich in this image. "
-            "Provide its bounding box coordinates in the format: "
-            "x_min, y_min, x_max, y_max (as percentages of image width/height). "
-            "If no clear sandwich is present, respond with 'None'."
-        )
+        prompt = "Identify the main sandwich... Provide its bounding box..."
         response = vision_model.generate_content([prompt, {'mime_type': mime_type, 'data': image_bytes}])
-        box_str = response.text.strip()
-        match = re.search(r'(\d+\.?\d*),\s*(\d+\.?\d*),\s*(\d+\.?\d*),\s*(\d+\.?\d*)', box_str)
+        match = re.search(r'(\d+\.?\d*),\s*(\d+\.?\d*),\s*(\d+\.?\d*),\s*(\d+\.?\d*)', response.text.strip())
         if match:
             x_min_perc, y_min_perc, x_max_perc, y_max_perc = map(float, match.groups())
-            x_min = int(x_min_perc / 100 * img_width)
-            y_min = int(y_min_perc / 100 * img_height)
-            x_max = int(x_max_perc / 100 * img_width)
-            y_max = int(y_max_perc / 100 * img_height)
-
-            if x_min > x_max:
-                x_min, x_max = x_max, x_min
-            if y_min > y_max:
-                y_min, y_max = y_max, y_min
-
-            x_min, y_min, x_max, y_max = max(0, x_min), max(0, y_min), min(img_width, x_max), min(img_height, y_max)
+            x_min, y_min, x_max, y_max = int(x_min_perc/100*img_width), int(y_min_perc/100*img_height), int(x_max_perc/100*img_width), int(y_max_perc/100*img_height)
+            if x_min > x_max: x_min, x_max = x_max, x_min
+            if y_min > y_max: y_min, y_max = y_max, y_min
             padding_x, padding_y = int(img_width * 0.02), int(img_height * 0.02)
             x_min, y_min, x_max, y_max = max(0, x_min - padding_x), max(0, y_min - padding_y), min(img_width, x_max + padding_x), min(img_height, y_max + padding_y)
-            
             return (x_min, y_min, x_max, y_max)
-        else:
-            st.warning(f"AI could not parse bounding box: {box_str}")
-            return None
-    except Exception as e:
-        st.error(f"Error getting bounding box from AI: {e}")
+        return None
+    except Exception:
         return None
 
 def analyze_filling_symmetry(cropped_image_bytes, mime_type):
     try:
-        prompt = (
-            "This is an image of a sandwich. Focus only on the layers between the bread. "
-            "Describe how evenly and symmetrically the filling ingredients (e.g., cheese, meat, vegetables) "
-            "are distributed and aligned. Be concise and objective."
-        )
+        prompt = "This is an image of a sandwich... Describe how evenly... the filling ingredients are distributed..."
         response = vision_model.generate_content([prompt, {'mime_type': mime_type, 'data': cropped_image_bytes}])
         return response.text.strip()
-    except Exception as e:
-        st.error(f"Error analyzing filling symmetry: {e}")
+    except Exception:
         return "AI could not analyze filling symmetry."
 
 def evaluate_symmetry_and_components(image_pil, uploaded_file_type):
+    st.info("Detecting sandwich boundaries with AI...")
     original_width, original_height = image_pil.size
     image_bytes, mime_type = get_image_bytes_and_mime(image_pil, uploaded_file_type)
-    st.info("Detecting sandwich boundaries with AI...")
     bbox = get_sandwich_bounding_box(image_bytes, mime_type, original_width, original_height)
-    
     if bbox and bbox[0] < bbox[2] and bbox[1] < bbox[3]:
         cropped_image_pil = image_pil.crop(bbox)
     else:
-        st.warning("Could not automatically crop to sandwich. Analyzing full image.")
+        st.warning("Could not automatically crop. Analyzing full image.")
         cropped_image_pil = image_pil
-    
-    cropped_image_bytes, _ = get_image_bytes_and_mime(cropped_image_pil, uploaded_file_type)
     image_pil_resized = cropped_image_pil.resize((400, 400))
     image_gray = image_pil_resized.convert("L")
-    
     image_blurred = image_gray.filter(ImageFilter.GaussianBlur(radius=2))
-    
     img_np = np.array(image_blurred)
-    
-    h, w = img_np.shape
-    mid = w // 2
-    left = img_np[:, :mid]
-    right = img_np[:, mid:]
-    
+    mid = img_np.shape[1] // 2
+    left, right = img_np[:, :mid], img_np[:, mid:]
     right_flipped = np.fliplr(right)
-    
     min_w = min(left.shape[1], right_flipped.shape[1])
-    left = left[:, :min_w]
-    right_flipped = right_flipped[:, :min_w]
-
+    left, right_flipped = left[:, :min_w], right_flipped[:, :min_w]
     diff = np.abs(left.astype(np.int16) - right_flipped.astype(np.int16))
-    
     score = round(100 - (np.mean(diff) / 255 * 100), 2)
-    ai_sandwich_analysis = "AI could not provide overall analysis."
-    is_actually_sandwich = False
-    try:
-        vision_response_is_sandwich = vision_model.generate_content(["Is this an image of a sandwich? Just reply with 'Yes' or 'No'.", {'mime_type': mime_type, 'data': image_bytes}])
-        if "yes" in vision_response_is_sandwich.text.strip().lower():
-            is_actually_sandwich = True
-            vision_response_desc = vision_model.generate_content(["Describe the main food item in this image. Be concise and objective.", {'mime_type': mime_type, 'data': image_bytes}])
-            ai_sandwich_analysis = vision_response_desc.text.strip()
-        else:
-            ai_sandwich_analysis = f"AI identified: {vision_response_is_sandwich.text.strip()}"
-            is_actually_sandwich = False
-    except Exception as e:
-        st.error(f"Error during initial sandwich check: {e}")
-        ai_sandwich_analysis = f"Initial sandwich check failed: {e}"
-        is_actually_sandwich = False
-    filling_analysis_description = "AI could not analyze filling symmetry."
+    is_actually_sandwich = "yes" in vision_model.generate_content(["Is this a sandwich? Yes or No.", {'mime_type': mime_type, 'data': image_bytes}]).text.strip().lower()
     if is_actually_sandwich:
-        st.info("Analyzing filling symmetry with AI...")
-        filling_analysis_description = analyze_filling_symmetry(cropped_image_bytes, mime_type)
+        ai_sandwich_analysis = vision_model.generate_content(["Describe the main food item...", {'mime_type': mime_type, 'data': image_bytes}]).text.strip()
+        filling_analysis_description = analyze_filling_symmetry(*get_image_bytes_and_mime(cropped_image_pil, uploaded_file_type))
+    else:
+        ai_sandwich_analysis = "AI did not identify a sandwich."
+        filling_analysis_description = "N/A"
     return score, None, None, None, ai_sandwich_analysis, is_actually_sandwich, filling_analysis_description
 
 def generate_comment(score, ai_sandwich_analysis, filling_analysis_description):
-    prompt = f"""
-You are a sarcastic and witty food critic who only reviews the symmetry of sandwiches.
-A sandwich just scored {score}/100 in a symmetry test.
-Overall AI observation: "{ai_sandwich_analysis}"
-Detailed filling analysis: "{filling_analysis_description}"
-
-Considering the score, the overall observation, AND especially the detailed filling analysis,
-write a short, quirky, one-line review filled with humor and sass.
-Incorporate specific details from the observations to make the critique more informed and dramatic.
-Avoid compliments if the score is low. Be generous if it's very high.
-Make it sound like a savage or dramatic food critique.
-"""
+    prompt = f"You are a sarcastic food critic... A sandwich scored {score}/100... Write a one-line review..."
     try:
-        response = gemini_model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        st.warning(f"Comment generation failed due to API error: {e}. Using fallback comment.")
-        if score > 85: return f"A respectable {score}/100. Well done."
-        else: return f"A score of {score}/100. There's room for improvement."
+        return gemini_model.generate_content(prompt).text.strip()
+    except Exception:
+        return f"A respectable {score}/100."
 
-
-# --- UI FORMS (Login/Signup) ---
+# --- UI Functions ---
 def show_login_page():
     st.header("Login")
     with st.form("login_form"):
@@ -271,9 +188,7 @@ def show_login_page():
         if submitted:
             user_id = authenticate_user(username, password)
             if user_id:
-                st.session_state['logged_in'] = True
-                st.session_state['user_id'] = user_id
-                st.session_state['username'] = username
+                st.session_state.update({'logged_in': True, 'user_id': user_id, 'username': username})
                 st.rerun()
             else:
                 st.error("Invalid username or password")
@@ -293,22 +208,31 @@ def show_signup_page():
                 st.session_state['page'] = 'Login'
                 st.rerun()
             else:
-                st.error("Username already taken. Please choose another.")
+                st.error("Username already taken.")
     if st.button("Already have an account? Login"):
         st.session_state['page'] = 'Login'
         st.rerun()
 
-
 # --- MAIN APP DISPLAY ---
 def show_main_app():
     st.sidebar.header(f"Welcome, {st.session_state['username']}!")
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Title Effect")
+    dark_col, light_col = st.sidebar.columns(2)
+    if dark_col.button("🌙 Dark mode", use_container_width=True):
+        st.session_state.glow_active = False
+        st.rerun()
+    if light_col.button("☀️ Light mode", use_container_width=True):
+        st.session_state.glow_active = True
+        st.rerun()
     if st.sidebar.button("Logout"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
-    st.markdown("""
-        <div class="title-container">
+    glow_class = "glow-effect" if st.session_state.get('glow_active', False) else ""
+    st.markdown(f"""
+        <div class="title-container {glow_class}">
             <div class="logo-emoji">🥪</div>
             <h1 class="main-title">Symmetrich</h1>
             <div class="logo-emoji">🥪</div>
@@ -317,50 +241,38 @@ def show_main_app():
     """, unsafe_allow_html=True)
     
     uploaded_file = st.file_uploader("Drag and drop file here", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
-
     if uploaded_file:
         image = Image.open(uploaded_file)
         st.image(image, caption="📷 Uploaded Sandwich", use_container_width=True)
         with st.spinner("Processing your sandwich with advanced AI..."):
-            score, _, _, _, analysis, is_sandwich, filling_desc = \
-                evaluate_symmetry_and_components(image, uploaded_file.type)
+            score, _, _, _, analysis, is_sandwich, filling_desc = evaluate_symmetry_and_components(image, uploaded_file.type)
         if not is_sandwich:
             st.error("🚫 That doesn't look like a sandwich.")
         else:
             if score >= 90:
-                st.balloons() 
-
+                st.balloons()
             with st.spinner("Generating critique..."):
                 comment = generate_comment(score, analysis, filling_desc)
-
             st.markdown(f"""
-            <div class="symmetry-box {'high-score' if score >= 80 else ''}">
+            <div class="symmetry-box">
                 <h3>📊 Symmetry Score<br><span>{score}</span> / 100</h3>
             </div>""", unsafe_allow_html=True)
-            
             st.info(f"**AI's Overall Analysis:** {analysis}")
             st.success(f"**Critique:** {comment}")
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            add_history_entry(st.session_state['user_id'], score, comment, image, timestamp)
+            add_history_entry(st.session_state['user_id'], score, comment, image, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     st.markdown("---")
-    
     st.subheader("📜 Your Symmetry History")
-
     user_history = get_user_history(st.session_state['user_id'])
-
     if not user_history:
-        st.write("You haven't analyzed any sandwiches yet. Upload one to start!")
+        st.write("You haven't analyzed any sandwiches yet.")
     else:
         for entry in user_history:
             score, comment, thumb_path, timestamp = entry
             st.markdown('<div class="history-entry">', unsafe_allow_html=True)
             cols = st.columns([1, 3])
             with cols[0]:
-                if os.path.exists(thumb_path):
-                    st.image(thumb_path)
-                else:
-                    st.error("Image not found")
+                st.image(thumb_path if os.path.exists(thumb_path) else "Image not found")
             with cols[1]:
                 st.metric(label="Symmetry Score", value=f"{score}/100")
                 st.write(f"**Critique:** {comment}")
@@ -369,9 +281,9 @@ def show_main_app():
 
 # --- ROUTING LOGIC ---
 if not st.session_state.get('logged_in'):
-    if st.session_state.get('page') == 'Signup':
-        show_signup_page()
-    else:
+    if st.session_state.get('page', 'Login') == 'Login':
         show_login_page()
+    else:
+        show_signup_page()
 else:
     show_main_app()
