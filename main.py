@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 from PIL import Image
 import numpy as np
@@ -9,7 +7,7 @@ import io
 import time
 import re
 from datetime import datetime
-import os # <-- FIXED: Added the missing 'os' import
+import os
 
 # Import all functions from your database file
 from database import (
@@ -24,7 +22,7 @@ from database import (
 setup_database()
 
 # --- Page Configuration ---
-st.set_page_config(page_title="🥪 Sandwich Symmetry Evaluator", layout="centered")
+st.set_page_config(page_title="Symmetrich", layout="centered")
 
 # --- Gemini Setup ---
 try:
@@ -45,16 +43,91 @@ if 'logged_in' not in st.session_state:
 # --- UI Styling ---
 st.markdown("""
     <style>
-        .stApp { background: linear-gradient(to right, #16222A, #3A6073); color: white; }
-        .symmetry-box { background-color: #1f1f2e; padding: 20px; border-radius: 15px; text-align: center; box-shadow: 0 0 20px #7b2ff7; margin-top: 20px; }
-        .high-score { animation: glow 1s ease-in-out infinite alternate; }
-        @keyframes glow { from { text-shadow: 0 0 10px #00ffcc, 0 0 20px #00ffcc; } to { text-shadow: 0 0 20px #00ffee, 0 0 30px #00ffee; } }
-        .history-entry { border: 1px solid #444; padding: 15px; border-radius: 10px; margin-bottom: 10px; background-color: rgba(0, 0, 0, 0.2); }
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
+
+        /* --- Global Styles --- */
+        html, body, *, h1, h2, h3, h4, h5, h6, [class*="st-"] {
+            font-family: 'Poppins', sans-serif !important;
+        }
+        .stApp {
+            background: linear-gradient(to right, #16222A, #3A6073);
+        }
+
+        /* --- Fun Title and Subtitle Styles --- */
+        .title-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding-top: 1rem;
+            padding-bottom: 0.5rem;
+            gap: 1.5rem; /* Increased space */
+        }
+        .logo-emoji {
+            font-size: 4rem; /* Made emojis bigger to match title */
+            animation: float 4s ease-in-out infinite;
+            text-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .logo-emoji:last-child {
+            animation-delay: -2s;
+        }
+        .main-title {
+            font-size: 6rem; /* Made the heading bigger */
+            font-weight: 700 !important;
+            background: linear-gradient(45deg, #00F5D4, #FF00FF, #FFD700);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-fill-color: transparent;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 1.1rem;
+            color: #C0C0C0;
+            font-weight: 300;
+            letter-spacing: 1.5px;
+            margin-bottom: 2rem;
+        }
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+        
+        /* --- Glassmorphism Containers --- */
+        .symmetry-box, .history-entry {
+            background-color: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            padding: 25px;
+        }
+        .symmetry-box {
+            text-align: center;
+            box-shadow: 0 0 30px rgba(0, 245, 212, 0.2);
+            margin-top: 20px;
+        }
+        .history-entry {
+            margin-bottom: 15px;
+        }
+        .high-score {
+            animation: glow 1.5s ease-in-out infinite alternate;
+        }
+        @keyframes glow {
+            from { box-shadow: 0 0 20px rgba(0, 245, 212, 0.3); }
+            to { box-shadow: 0 0 40px rgba(0, 245, 212, 0.7); }
+        }
+        .symmetry-box h3 span {
+            color: #00F5D4;
+            font-weight: 700 !important;
+            font-size: 1.5em;
+            text-shadow: 0 0 15px rgba(0, 245, 212, 0.7);
+        }
     </style>
 """, unsafe_allow_html=True)
 
 
-# --- Helper Functions (From original code) ---
+# --- Helper Functions (No Changes Here) ---
 def get_image_bytes_and_mime(image_pil, uploaded_file_type):
     image_bytes_io = io.BytesIO()
     image_pil.save(image_bytes_io, format=image_pil.format if image_pil.format else 'PNG')
@@ -93,9 +166,7 @@ def analyze_filling_symmetry(cropped_image_bytes, mime_type):
         prompt = (
             "This is an image of a sandwich. Focus only on the layers between the bread. "
             "Describe how evenly and symmetrically the filling ingredients (e.g., cheese, meat, vegetables) "
-            "are distributed and aligned. Be concise and objective. "
-            "For example: 'Filling is perfectly centered and evenly layered.' "
-            "Or: 'Meat is skewed to one side, cheese is off-center.'"
+            "are distributed and aligned. Be concise and objective."
         )
         response = vision_model.generate_content([prompt, {'mime_type': mime_type, 'data': cropped_image_bytes}])
         return response.text.strip()
@@ -103,7 +174,6 @@ def analyze_filling_symmetry(cropped_image_bytes, mime_type):
         st.error(f"Error analyzing filling symmetry: {e}")
         return "AI could not analyze filling symmetry."
 
-# --- RESTORED: Original, detailed analysis and comment functions ---
 def evaluate_symmetry_and_components(image_pil, uploaded_file_type):
     original_width, original_height = image_pil.size
     image_bytes, mime_type = get_image_bytes_and_mime(image_pil, uploaded_file_type)
@@ -157,9 +227,6 @@ Overall AI observation: "{ai_sandwich_analysis}"
 Detailed filling analysis: "{filling_analysis_description}"
 Considering the score, the overall observation, AND especially the detailed filling analysis,
 write a short, quirky, one-line review filled with humor and sass.
-Incorporate specific details from the observations to make the critique more informed and dramatic.
-Avoid compliments if the score is low. Be generous if it's very high.
-Make it sound like a savage or dramatic food critique.
 """
     try:
         response = gemini_model.generate_content(prompt)
@@ -170,7 +237,7 @@ Make it sound like a savage or dramatic food critique.
         else: return f"A score of {score}/100. There's room for improvement."
 
 
-# --- UI FORMS (Login/Signup) ---
+# --- UI FORMS (Login/Signup - No Changes Here) ---
 def show_login_page():
     st.header("Login")
     with st.form("login_form"):
@@ -216,9 +283,16 @@ def show_main_app():
             del st.session_state[key]
         st.rerun()
 
-    st.title("🥪 Symmetrich")
-    st.subheader("Upload your sandwich masterpiece")
-    uploaded_file = st.file_uploader("Drag and drop file here", type=["jpg", "jpeg", "png"])
+    st.markdown("""
+        <div class="title-container">
+            <div class="logo-emoji">🥪</div>
+            <h1 class="main-title">Symmetrich</h1>
+            <div class="logo-emoji">🥪</div>
+        </div>
+        <p class="subtitle">Upload your sandwich masterpiece</p>
+    """, unsafe_allow_html=True)
+    
+    uploaded_file = st.file_uploader("Drag and drop file here", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
 
     if uploaded_file:
         image = Image.open(uploaded_file)
@@ -231,17 +305,22 @@ def show_main_app():
         else:
             with st.spinner("Generating critique..."):
                 comment = generate_comment(score, analysis, filling_desc)
+
             st.markdown(f"""
             <div class="symmetry-box {'high-score' if score >= 80 else ''}">
-                <h3>📊 Symmetry Score: <span style="color:#00FFAD">{score}</span> / 100</h3>
+                <h3>📊 Symmetry Score<br><span>{score}</span> / 100</h3>
             </div>""", unsafe_allow_html=True)
+            
             st.info(f"**AI's Overall Analysis:** {analysis}")
             st.success(f"**Critique:** {comment}")
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             add_history_entry(st.session_state['user_id'], score, comment, image, timestamp)
 
     st.markdown("---")
-    st.header("📜 Your Symmetry History")
+    
+    # Replaced the custom HTML with a simpler, left-aligned subheader
+    st.subheader("📜 Your Symmetry History")
+
     user_history = get_user_history(st.session_state['user_id'])
 
     if not user_history:
@@ -252,7 +331,7 @@ def show_main_app():
             st.markdown('<div class="history-entry">', unsafe_allow_html=True)
             cols = st.columns([1, 3])
             with cols[0]:
-                if os.path.exists(thumb_path): # <-- This line now works correctly
+                if os.path.exists(thumb_path):
                     st.image(thumb_path)
                 else:
                     st.error("Image not found")
