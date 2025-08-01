@@ -1,5 +1,5 @@
 streamlit
+opencv-python-headless
 numpy
-opencv-python
 Pillow
 google-generativeai
