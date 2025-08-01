@@ -60,10 +60,10 @@ st.markdown("""
             align-items: center;
             padding-top: 1rem;
             padding-bottom: 0.5rem;
-            gap: 1.5rem; /* Increased space */
+            gap: 1.5rem;
         }
         .logo-emoji {
-            font-size: 4rem; /* Made emojis bigger to match title */
+            font-size: 4rem;
             animation: float 4s ease-in-out infinite;
             text-shadow: 0 5px 15px rgba(0,0,0,0.3);
         }
@@ -71,7 +71,7 @@ st.markdown("""
             animation-delay: -2s;
         }
         .main-title {
-            font-size: 6rem; /* Made the heading bigger */
+            font-size: 6rem;
             font-weight: 700 !important;
             background: linear-gradient(45deg, #00F5D4, #FF00FF, #FFD700);
             -webkit-background-clip: text;
@@ -127,7 +127,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- Helper Functions (No Changes Here) ---
+# --- Helper Functions ---
 def get_image_bytes_and_mime(image_pil, uploaded_file_type):
     image_bytes_io = io.BytesIO()
     image_pil.save(image_bytes_io, format=image_pil.format if image_pil.format else 'PNG')
@@ -150,9 +150,16 @@ def get_sandwich_bounding_box(image_bytes, mime_type, img_width, img_height):
             y_min = int(y_min_perc / 100 * img_height)
             x_max = int(x_max_perc / 100 * img_width)
             y_max = int(y_max_perc / 100 * img_height)
+
+            if x_min > x_max:
+                x_min, x_max = x_max, x_min
+            if y_min > y_max:
+                y_min, y_max = y_max, y_min
+
             x_min, y_min, x_max, y_max = max(0, x_min), max(0, y_min), min(img_width, x_max), min(img_height, y_max)
             padding_x, padding_y = int(img_width * 0.02), int(img_height * 0.02)
             x_min, y_min, x_max, y_max = max(0, x_min - padding_x), max(0, y_min - padding_y), min(img_width, x_max + padding_x), min(img_height, y_max + padding_y)
+            
             return (x_min, y_min, x_max, y_max)
         else:
             st.warning(f"AI could not parse bounding box: {box_str}")
@@ -179,11 +186,13 @@ def evaluate_symmetry_and_components(image_pil, uploaded_file_type):
     image_bytes, mime_type = get_image_bytes_and_mime(image_pil, uploaded_file_type)
     st.info("Detecting sandwich boundaries with AI...")
     bbox = get_sandwich_bounding_box(image_bytes, mime_type, original_width, original_height)
-    cropped_image_pil = image_pil
-    if bbox:
+    
+    if bbox and bbox[0] < bbox[2] and bbox[1] < bbox[3]:
         cropped_image_pil = image_pil.crop(bbox)
     else:
         st.warning("Could not automatically crop to sandwich. Analyzing full image.")
+        cropped_image_pil = image_pil
+    
     cropped_image_bytes, _ = get_image_bytes_and_mime(cropped_image_pil, uploaded_file_type)
     image_pil_resized = cropped_image_pil.resize((400, 400))
     image_gray = image_pil_resized.convert("L")
@@ -220,13 +229,18 @@ def evaluate_symmetry_and_components(image_pil, uploaded_file_type):
     return score, diff, None, None, ai_sandwich_analysis, is_actually_sandwich, filling_analysis_description
 
 def generate_comment(score, ai_sandwich_analysis, filling_analysis_description):
+    # --- RESTORED a more detailed prompt for better, more accurate critiques ---
     prompt = f"""
 You are a sarcastic and witty food critic who only reviews the symmetry of sandwiches.
 A sandwich just scored {score}/100 in a symmetry test.
 Overall AI observation: "{ai_sandwich_analysis}"
 Detailed filling analysis: "{filling_analysis_description}"
+
 Considering the score, the overall observation, AND especially the detailed filling analysis,
 write a short, quirky, one-line review filled with humor and sass.
+Incorporate specific details from the observations to make the critique more informed and dramatic.
+Avoid compliments if the score is low. Be generous if it's very high.
+Make it sound like a savage or dramatic food critique.
 """
     try:
         response = gemini_model.generate_content(prompt)
@@ -237,7 +251,7 @@ write a short, quirky, one-line review filled with humor and sass.
         else: return f"A score of {score}/100. There's room for improvement."
 
 
-# --- UI FORMS (Login/Signup - No Changes Here) ---
+# --- UI FORMS (Login/Signup) ---
 def show_login_page():
     st.header("Login")
     with st.form("login_form"):
@@ -303,6 +317,9 @@ def show_main_app():
         if not is_sandwich:
             st.error("🚫 That doesn't look like a sandwich.")
         else:
+            if score >= 90:
+                st.balloons() 
+
             with st.spinner("Generating critique..."):
                 comment = generate_comment(score, analysis, filling_desc)
 
@@ -318,7 +335,6 @@ def show_main_app():
 
     st.markdown("---")
     
-    # Replaced the custom HTML with a simpler, left-aligned subheader
     st.subheader("📜 Your Symmetry History")
 
     user_history = get_user_history(st.session_state['user_id'])
